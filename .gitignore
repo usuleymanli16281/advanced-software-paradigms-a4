@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+result.jpg
+
+.DS_Store
+Thumbs.db

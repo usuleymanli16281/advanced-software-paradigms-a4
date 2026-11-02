@@ -40,7 +40,7 @@ public partial class MainWindow : Window
                 using SKBitmap bitmap = SKBitmap.Decode(Program.Options.FilePath)
                     ?? throw new InvalidOperationException("Unable to decode image.");
 
-                ImageProcessor.Pixelate(bitmap, Program.Options.SquareSize);
+                ImageProcessor.Pixelate(bitmap, Program.Options.SquareSize, Program.Options.Mode);
 
                 using FileStream stream = File.Create(outputPath);
 

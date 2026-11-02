@@ -1,18 +1,48 @@
 using System;
+using System.Threading.Tasks;
 using SkiaSharp;
 
 namespace ImagePixelation;
 
 public static class ImageProcessor
 {
-    public static void Pixelate(SKBitmap bitmap, int squareSize)
+    public static void Pixelate(SKBitmap bitmap, int squareSize, char mode)
     {
-        int width = bitmap.Width;
-        int height = bitmap.Height;
-
-        for (int y = 0; y < height; y += squareSize)
+        if (mode == 'S')
         {
-            for (int x = 0; x < width; x += squareSize)
+            ProcessRows(bitmap, squareSize, 0,
+                (bitmap.Height + (long)squareSize - 1) / squareSize);
+        }
+        else if (mode == 'M')
+        {
+            int rowCount = (int)((bitmap.Height + (long)squareSize - 1) / squareSize);
+            int workerCount = Math.Min(Environment.ProcessorCount, rowCount);
+
+            Parallel.For(0, workerCount, new ParallelOptions
+            {
+                MaxDegreeOfParallelism = workerCount
+            }, worker =>
+            {
+                int startRow = worker * rowCount / workerCount;
+                int endRow = (worker + 1) * rowCount / workerCount;
+
+                ProcessRows(bitmap, squareSize, startRow, endRow);
+            });
+        }
+        else
+        {
+            throw new ArgumentException("Invalid processing mode.");
+        }
+    }
+
+    private static void ProcessRows(
+        SKBitmap bitmap, int squareSize, long startRow, long endRow)
+    {
+        for (long row = startRow; row < endRow; row++)
+        {
+            int y = (int)(row * squareSize);
+
+            for (int x = 0; x < bitmap.Width; x += squareSize)
             {
                 ProcessSquare(bitmap, x, y, squareSize);
             }

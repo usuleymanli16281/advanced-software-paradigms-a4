@@ -1,9 +1,28 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="ImagePixelation.MainWindow"
-        Title="ImagePixelation">
-    Welcome to Avalonia!
+        Title="Image Pixelation"
+        Width="1000"
+        Height="700"
+        MinWidth="400"
+        MinHeight="300"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,*" Margin="15" RowSpacing="10">
+
+        <TextBlock x:Name="ImageInfo"
+                   Grid.Row="0"
+                   FontSize="14"/>
+
+        <Border Grid.Row="1"
+                Background="#222222"
+                ClipToBounds="True">
+
+            <Image x:Name="ImageDisplay"
+                   Stretch="Uniform"
+                   StretchDirection="DownOnly"/>
+
+        </Border>
+
+    </Grid>
 </Window>

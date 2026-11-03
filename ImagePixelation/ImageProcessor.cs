@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
 
@@ -7,22 +6,38 @@ namespace ImagePixelation;
 
 public static class ImageProcessor
 {
-    public static void Pixelate(
+    public static void PixelateBatch(
         SKBitmap bitmap,
         int squareSize,
         char mode,
-        Action<int, int>? onRowCompleted = null)
+        int batch,
+        int batchCount,
+        Action<int, int>? onRegionCompleted = null)
     {
+        if (squareSize <= 0)
+            throw new ArgumentException("Square size must be positive.");
+
+        if (bitmap.ColorType != SKColorType.Bgra8888)
+            throw new ArgumentException("Bitmap must use BGRA8888 format.");
+
+        if (batchCount <= 0 || batch < 0 || batch >= batchCount)
+            throw new ArgumentException("Invalid batch.");
+
         int rowCount = (int)(
             (bitmap.Height + (long)squareSize - 1) / squareSize);
 
         if (mode == 'S')
         {
-            ProcessRows(bitmap, squareSize, 0, rowCount, onRowCompleted);
+            int start = (int)((long)rowCount * batch / batchCount);
+            int end = (int)((long)rowCount * (batch + 1) / batchCount);
+
+            ProcessRows(bitmap, squareSize, start, end);
+            ReportRegion(start, end);
         }
         else if (mode == 'M')
         {
-            int workerCount = Math.Min(Environment.ProcessorCount, rowCount);
+            int workerCount = Math.Min(
+                Environment.ProcessorCount, rowCount);
 
             Parallel.For(0, workerCount,
                 new ParallelOptions
@@ -31,15 +46,35 @@ public static class ImageProcessor
                 },
                 worker =>
                 {
-                    int startRow = worker * rowCount / workerCount;
-                    int endRow = (worker + 1) * rowCount / workerCount;
+                    int regionStart = worker * rowCount / workerCount;
+                    int regionEnd = (worker + 1) * rowCount / workerCount;
+                    int regionRows = regionEnd - regionStart;
 
-                    ProcessRows(bitmap, squareSize, startRow, endRow, onRowCompleted);
+                    int start = regionStart +
+                        (int)((long)regionRows * batch / batchCount);
+
+                    int end = regionStart +
+                        (int)((long)regionRows * (batch + 1) / batchCount);
+
+                    ProcessRows(bitmap, squareSize, start, end);
+                    ReportRegion(start, end);
                 });
         }
         else
         {
             throw new ArgumentException("Invalid processing mode.");
+        }
+
+        void ReportRegion(int start, int end)
+        {
+            if (start >= end)
+                return;
+
+            int top = (int)((long)start * squareSize);
+            int bottom = (int)Math.Min(
+                (long)end * squareSize, bitmap.Height);
+
+            onRegionCompleted?.Invoke(top, bottom);
         }
     }
 
@@ -47,57 +82,77 @@ public static class ImageProcessor
         SKBitmap bitmap,
         int squareSize,
         int startRow,
-        int endRow,
-        Action<int, int>? onRowCompleted)
+        int endRow)
     {
+        Span<byte> pixels = bitmap.GetPixelSpan();
+
         for (int row = startRow; row < endRow; row++)
         {
             int y = (int)((long)row * squareSize);
-            int bottom = (int)Math.Min((long)y + squareSize, bitmap.Height);
+            int bottom = (int)Math.Min(
+                (long)y + squareSize, bitmap.Height);
 
             for (long x = 0; x < bitmap.Width; x += squareSize)
             {
-                ProcessSquare(bitmap, (int)x, y, squareSize);
+                ProcessSquare(
+                    pixels,
+                    bitmap.RowBytes,
+                    bitmap.Width,
+                    (int)x,
+                    y,
+                    squareSize,
+                    bottom);
             }
-
-            onRowCompleted?.Invoke(y, bottom);
         }
     }
 
     private static void ProcessSquare(
-        SKBitmap bitmap, int startX, int startY, int squareSize)
+        Span<byte> pixels,
+        int stride,
+        int width,
+        int startX,
+        int startY,
+        int squareSize,
+        int endY)
     {
-        int endX = (int)Math.Min((long)startX + squareSize, bitmap.Width);
-        int endY = (int)Math.Min((long)startY + squareSize, bitmap.Height);
+        int endX = (int)Math.Min(
+            (long)startX + squareSize, width);
 
-        long totalRed = 0;
-        long totalGreen = 0;
         long totalBlue = 0;
+        long totalGreen = 0;
+        long totalRed = 0;
         long count = 0;
 
         for (int y = startY; y < endY; y++)
         {
+            int offset = y * stride + startX * 4;
+
             for (int x = startX; x < endX; x++)
             {
-                SKColor color = bitmap.GetPixel(x, y);
+                totalBlue += pixels[offset];
+                totalGreen += pixels[offset + 1];
+                totalRed += pixels[offset + 2];
 
-                totalRed += color.Red;
-                totalGreen += color.Green;
-                totalBlue += color.Blue;
+                offset += 4;
                 count++;
             }
         }
 
-        SKColor average = new SKColor(
-            (byte)(totalRed / count),
-            (byte)(totalGreen / count),
-            (byte)(totalBlue / count));
+        byte blue = (byte)(totalBlue / count);
+        byte green = (byte)(totalGreen / count);
+        byte red = (byte)(totalRed / count);
 
         for (int y = startY; y < endY; y++)
         {
+            int offset = y * stride + startX * 4;
+
             for (int x = startX; x < endX; x++)
             {
-                bitmap.SetPixel(x, y, average);
+                pixels[offset] = blue;
+                pixels[offset + 1] = green;
+                pixels[offset + 2] = red;
+
+                offset += 4;
             }
         }
     }

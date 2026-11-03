@@ -2,9 +2,8 @@ using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using SkiaSharp;
 using System;
-using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.IO;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace ImagePixelation;
@@ -32,70 +31,72 @@ public partial class MainWindow : Window
     {
         try
         {
-            using SKBitmap source = SKBitmap.Decode(Program.Options.FilePath)
+            using SKBitmap decoded = SKBitmap.Decode(Program.Options.FilePath)
                 ?? throw new InvalidOperationException("Unable to decode image.");
 
-            using SKBitmap preview = source.Copy()
+            using SKBitmap source = decoded.Copy(SKColorType.Bgra8888)
+                ?? throw new InvalidOperationException("Unable to convert image.");
+
+            double scale = Math.Min(
+                1.0,
+                Math.Min(900.0 / source.Width, 650.0 / source.Height));
+
+            int previewWidth = Math.Max(1, (int)(source.Width * scale));
+            int previewHeight = Math.Max(1, (int)(source.Height * scale));
+
+            using SKBitmap preview = source.Resize(
+                new SKImageInfo(previewWidth, previewHeight),
+                new SKSamplingOptions(SKFilterMode.Linear))
                 ?? throw new InvalidOperationException("Unable to create preview.");
 
-            object previewLock = new object();
+            using SKCanvas canvas = new SKCanvas(preview);
 
             int squareSize = Program.Options.SquareSize;
-            int totalRows = (int)(
+            int rowCount = (int)(
                 (source.Height + (long)squareSize - 1) / squareSize);
 
-            int completedRows = 0;
+            int batchCount = Math.Min(8, rowCount);
 
             ImageInfo.Text = "Processing: 0%";
+            ProcessingProgress.Value = 0;
 
-            Task<TimeSpan> processingTask = Task.Run(() =>
+            for (int batch = 0; batch < batchCount; batch++)
             {
-                Stopwatch stopwatch = Stopwatch.StartNew();
+                int currentBatch = batch;
+                var regions = new ConcurrentQueue<(int Top, int Bottom)>();
 
-                ImageProcessor.Pixelate(
-                    source,
-                    squareSize,
-                    Program.Options.Mode,
-                    (startY, endY) =>
-                    {
-                        lock (previewLock)
-                        {
-                            for (int y = startY; y < endY; y++)
-                            {
-                                for (int x = 0; x < source.Width; x++)
-                                {
-                                    preview.SetPixel(x, y, source.GetPixel(x, y));
-                                }
-                            }
-                        }
-
-                        Interlocked.Increment(ref completedRows);
-                    });
-
-                stopwatch.Stop();
-                return stopwatch.Elapsed;
-            });
-
-            while (!processingTask.IsCompleted)
-            {
-                await Task.WhenAny(processingTask, Task.Delay(250));
-
-                if (processingTask.IsCompleted)
-                    break;
-
-                byte[] previewBytes = await Task.Run(() =>
+                await Task.Run(() =>
                 {
-                    lock (previewLock)
-                    {
-                        using SKImage image = SKImage.FromBitmap(preview);
-                        using SKData data = image.Encode(
-                            SKEncodedImageFormat.Jpeg, 80);
-
-                        return data.ToArray();
-                    }
+                    ImageProcessor.PixelateBatch(
+                        source,
+                        squareSize,
+                        Program.Options.Mode,
+                        currentBatch,
+                        batchCount,
+                        (top, bottom) => regions.Enqueue((top, bottom)));
                 });
 
-                using MemoryStream stream = new MemoryStream(previewBytes);
+                while (regions.TryDequeue(out var region))
+                {
+                    SKRect sourceRect = new SKRect(
+                        0, region.Top, source.Width, region.Bottom);
+
+                    SKRect destinationRect = new SKRect(
+                        0,
+                        (float)(region.Top * scale),
+                        previewWidth,
+                        (float)(region.Bottom * scale));
+
+                    canvas.DrawBitmap(
+                        source,
+                        sourceRect,
+                        destinationRect,
+                        new SKSamplingOptions(SKFilterMode.Linear));
+                }
+
+                using SKImage image = SKImage.FromBitmap(preview);
+                using SKData data = image.Encode(SKEncodedImageFormat.Jpeg, 85);
+                using MemoryStream stream = new MemoryStream(data.ToArray());
 
                 Bitmap updatedBitmap = new Bitmap(stream);
 
@@ -104,12 +105,16 @@ public partial class MainWindow : Window
                 _bitmap?.Dispose();
                 _bitmap = updatedBitmap;
 
-                int progress = Volatile.Read(ref completedRows) * 100 / totalRows;
+                int progress = (batch + 1) * 100 / batchCount;
 
-                ImageInfo.Text = $"Processing: {progress}% | Mode: {Program.Options.Mode}";
+                ProcessingProgress.Value = progress;
+
+                ImageInfo.Text =
+                    $"Processing: {progress}% | Mode: {Program.Options.Mode}";
+
+                if (batch < batchCount - 1)
+                    await Task.Delay(1000);
             }
-
-            TimeSpan elapsed = await processingTask;
 
             string outputPath = Path.GetFullPath("result.jpg");
 
@@ -128,9 +133,10 @@ public partial class MainWindow : Window
             _bitmap?.Dispose();
             _bitmap = finalBitmap;
 
+            ProcessingProgress.Value = 100;
+
             ImageInfo.Text =
-                $"Completed in {elapsed.TotalSeconds:F2}s | " +
-                $"Mode: {Program.Options.Mode} | " +
+                $"Completed | Mode: {Program.Options.Mode} | " +
                 $"Saved to: {outputPath}";
         }
         catch (Exception ex)

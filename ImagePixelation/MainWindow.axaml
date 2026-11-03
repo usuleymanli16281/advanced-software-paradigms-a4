@@ -8,13 +8,20 @@
         MinHeight="300"
         WindowStartupLocation="CenterScreen">
 
-    <Grid RowDefinitions="Auto,*" Margin="15" RowSpacing="10">
+    <Grid RowDefinitions="Auto,Auto,*" Margin="15" RowSpacing="10">
 
         <TextBlock x:Name="ImageInfo"
                    Grid.Row="0"
                    FontSize="14"/>
+        
+        <ProgressBar x:Name="ProcessingProgress"
+             Grid.Row="1"
+             Minimum="0"
+             Maximum="100"
+             Value="0"
+             Height="12"/>
 
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 Background="#222222"
                 ClipToBounds="True">
 

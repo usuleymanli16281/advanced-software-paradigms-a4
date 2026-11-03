@@ -30,5 +30,6 @@ if [ ! -f "$APP" ]; then
 fi
 
 chmod +x "$APP"
+codesign --force --sign - "$APP"
 
 exec "$APP" "$@"

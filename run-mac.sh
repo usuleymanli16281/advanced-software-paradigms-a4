@@ -17,7 +17,12 @@ if [ ! -f "$APP" ]; then
     URL="https://github.com/usuleymanli16281/advanced-software-paradigms-a4/releases/download/v1.0.0/ImagePixelation-macOS-ARM64.zip"
 
     echo "Downloading macOS application..."
-    curl -fL "$URL" -o "$APP_DIR/app.zip"
+
+    curl --http1.1 -fL \
+        --retry 5 \
+        --retry-delay 3 \
+        --connect-timeout 30 \
+        "$URL" -o "$APP_DIR/app.zip"
 
     echo "Extracting application..."
     unzip -oq "$APP_DIR/app.zip" -d "$APP_DIR"
